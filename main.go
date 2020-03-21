@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	stringutils "github.com/alessiosavi/GoGPUtils/string"
 	"github.com/alessiosavi/GoGitCommitStream/structure"
+	"github.com/aws/aws-lambda-go/lambda"
 )
 
 func core(hour, minutes, second int, url string) bool {
@@ -46,20 +48,25 @@ func core(hour, minutes, second int, url string) bool {
 	return n.Commit.Author.Date.After(currentDate)
 }
 
-type server struct {
-	hours   int
-	minutes int
-	second  int
-	url     string
+type Server struct {
+	hours   int    `json="hours"`
+	minutes int    `json="minutes"`
+	second  int    `json="second"`
+	url     string `json="url"`
 }
 
-func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(fmt.Sprintf(`{"updated": "%t"}`, core(s.hours, s.minutes, s.second, s.url))))
 }
 
 func main() {
+	lambda.Start(HandleRequest)
+
+}
+
+func console() {
 	githuUrl := flag.String("url", "", "url related to the github.com project")
 	port := flag.Int("port", 8080, "port to spawn the server")
 	hour := flag.Int("hour", 18, "hour related to the commit time to check")
@@ -71,7 +78,7 @@ func main() {
 		panic("url is a mandatory parameter")
 	}
 
-	s := &server{hours: *hour, minutes: *minutes, second: *seconds, url: *githuUrl}
+	s := &Server{hours: *hour, minutes: *minutes, second: *seconds, url: *githuUrl}
 	http.Handle("/", s)
 	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*port), nil))
 }
@@ -86,4 +93,8 @@ func getBody(body io.ReadCloser) (string, error) {
 		return "", nil
 	}
 	return sb.String(), nil
+}
+
+func HandleRequest(ctx context.Context, request Server) (string, error) {
+	return fmt.Sprintf(`{"updated": "%t"}`, core(request.hours, request.minutes, request.second, request.url)), nil
 }
