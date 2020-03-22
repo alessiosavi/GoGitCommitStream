@@ -6,9 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +21,7 @@ func core(hour, minutes, second int, url string) bool {
 		err          error
 		body         string
 		notification []structure.GitStream
+		loc          *time.Location
 	)
 
 	if resp, err = http.Get(url); err != nil {
@@ -37,50 +36,47 @@ func core(hour, minutes, second int, url string) bool {
 		fmt.Println(err)
 		return false
 	}
-	if len(notification) < 1 {
+	if len(notification) == 0 {
 		fmt.Println("Not enough data")
 		return false
 	}
 
-	t := time.Now()
-	currentDate := time.Date(t.Year(), t.Month(), t.Day(), hour, minutes, second, 0, time.Local)
+	if loc, err = time.LoadLocation("Europe/Rome"); err != nil {
+		panic(err)
+	}
+	time.Local = loc
+
+	t := time.Now().Local()
+	targetDate := time.Date(t.Year(), t.Month(), t.Day(), hour, minutes, second, 0, loc)
 	n := notification[0]
-	return n.Commit.Author.Date.After(currentDate)
+
+	return n.Commit.Author.Date.In(loc).After(targetDate)
 }
 
-type Server struct {
-	hours   int    `json="hours"`
-	minutes int    `json="minutes"`
-	second  int    `json="second"`
-	url     string `json="url"`
-}
-
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(fmt.Sprintf(`{"updated": "%t"}`, core(s.hours, s.minutes, s.second, s.url))))
+type InputRequest struct {
+	Hours   int    `json:"hours"`
+	Minutes int    `json:"minutes"`
+	Second  int    `json:"second"`
+	Url     string `json:"url"`
 }
 
 func main() {
 	lambda.Start(HandleRequest)
-
+	// console()
 }
 
 func console() {
-	githuUrl := flag.String("url", "", "url related to the github.com project")
-	port := flag.Int("port", 8080, "port to spawn the server")
-	hour := flag.Int("hour", 18, "hour related to the commit time to check")
+	url := flag.String("url", "", "url related to the github.com project")
+	hour := flag.Int("hour", 19, "hour related to the commit time to check")
 	minutes := flag.Int("minutes", 0, "minutes related to the commit time to check")
 	seconds := flag.Int("seconds", 0, "seconds related to the commit time to check")
 	flag.Parse()
 
-	if stringutils.IsBlank(*githuUrl) {
+	if stringutils.IsBlank(*url) {
 		panic("url is a mandatory parameter")
 	}
 
-	s := &Server{hours: *hour, minutes: *minutes, second: *seconds, url: *githuUrl}
-	http.Handle("/", s)
-	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*port), nil))
+	fmt.Printf(`{"updated": "%t","datetime":"%s"}`, core(*hour, *minutes, *seconds, *url), time.Now().Format(time.RFC3339))
 }
 
 // GetBody is delegated to retrieve the body from the given response
@@ -95,6 +91,6 @@ func getBody(body io.ReadCloser) (string, error) {
 	return sb.String(), nil
 }
 
-func HandleRequest(ctx context.Context, request Server) (string, error) {
-	return fmt.Sprintf(`{"updated": "%t"}`, core(request.hours, request.minutes, request.second, request.url)), nil
+func HandleRequest(ctx context.Context, request InputRequest) (string, error) {
+	return fmt.Sprintf(`{"updated": "%t","datetime":"%s"}`, core(request.Hours, request.Minutes, request.Second, request.Url), time.Now().Format(time.RFC3339)), nil
 }
