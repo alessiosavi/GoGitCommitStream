@@ -48,9 +48,12 @@ func core(hour, minutes, second int, url string) bool {
 
 	t := time.Now().Local()
 	targetDate := time.Date(t.Year(), t.Month(), t.Day(), hour, minutes, second, 0, loc)
-	n := notification[0]
+	fmt.Printf("Target date: %+v\n", targetDate)
 
-	return n.Commit.Author.Date.In(loc).After(targetDate)
+	n := notification[0]
+	fmt.Printf("Git date: %+v\n", n.Commit.Author.Date)
+	fmt.Printf("Git date normalized: %+v\n", n.Commit.Author.Date.Local())
+	return n.Commit.Author.Date.Local().After(targetDate)
 }
 
 type InputRequest struct {
@@ -62,12 +65,12 @@ type InputRequest struct {
 
 func main() {
 	lambda.Start(HandleRequest)
-	// console()
+	//console()
 }
 
 func console() {
 	url := flag.String("url", "", "url related to the github.com project")
-	hour := flag.Int("hour", 19, "hour related to the commit time to check")
+	hour := flag.Int("hour", 18, "hour related to the commit time to check")
 	minutes := flag.Int("minutes", 0, "minutes related to the commit time to check")
 	seconds := flag.Int("seconds", 0, "seconds related to the commit time to check")
 	flag.Parse()
