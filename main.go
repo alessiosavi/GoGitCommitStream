@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 )
 
-func core(hour, minutes, second int, url string) bool {
+func core(hour, minutes, second int, githUrl string) OutputResponse {
 	var (
 		resp         *http.Response
 		err          error
@@ -24,21 +25,26 @@ func core(hour, minutes, second int, url string) bool {
 		loc          *time.Location
 	)
 
-	if resp, err = http.Get(url); err != nil {
+	fmt.Println("Url before " + githUrl)
+	if githUrl, err = url.PathUnescape(githUrl); err != nil {
+		panic(err)
+	}
+	fmt.Println("Url after " + githUrl)
+	if resp, err = http.Get(githUrl); err != nil {
 		fmt.Println(err)
-		return false
+		return OutputResponse{}
 	}
 	if body, err = getBody(resp.Body); err != nil {
 		fmt.Println(err)
-		return false
+		return OutputResponse{}
 	}
 	if err = json.Unmarshal([]byte(body), &notification); err != nil {
 		fmt.Println(err)
-		return false
+		return OutputResponse{}
 	}
 	if len(notification) == 0 {
 		fmt.Println("Not enough data")
-		return false
+		return OutputResponse{}
 	}
 
 	if loc, err = time.LoadLocation("Europe/Rome"); err != nil {
@@ -47,13 +53,27 @@ func core(hour, minutes, second int, url string) bool {
 	time.Local = loc
 
 	t := time.Now().Local()
-	targetDate := time.Date(t.Year(), t.Month(), t.Day(), hour, minutes, second, 0, loc)
-	fmt.Printf("Target date: %+v\n", targetDate)
+	targetTime := time.Date(t.Year(), t.Month(), t.Day(), hour, minutes, second, 0, loc)
+	fmt.Printf("Target date: %+v\n", targetTime)
 
 	n := notification[0]
 	fmt.Printf("Git date: %+v\n", n.Commit.Author.Date)
 	fmt.Printf("Git date normalized: %+v\n", n.Commit.Author.Date.Local())
-	return n.Commit.Author.Date.Local().After(targetDate)
+
+	var output OutputResponse
+
+	output.LatestCommit = n.Commit.Author.Date.Local()
+	output.TargetTime = targetTime
+	output.Time = t
+	output.Updated = output.LatestCommit.After(targetTime)
+	return output
+}
+
+type OutputResponse struct {
+	Time         time.Time `json:"time"`
+	Updated      bool      `json:"updated"`
+	LatestCommit time.Time `json:"commitTime"`
+	TargetTime   time.Time `json:"targetTime"`
 }
 
 type InputRequest struct {
@@ -65,7 +85,7 @@ type InputRequest struct {
 
 func main() {
 	lambda.Start(HandleRequest)
-	//console()
+	// console()
 }
 
 func console() {
@@ -94,6 +114,7 @@ func getBody(body io.ReadCloser) (string, error) {
 	return sb.String(), nil
 }
 
-func HandleRequest(ctx context.Context, request InputRequest) (string, error) {
-	return fmt.Sprintf(`{"updated": "%t","datetime":"%s"}`, core(request.Hours, request.Minutes, request.Second, request.Url), time.Now().Format(time.RFC3339)), nil
+func HandleRequest(ctx context.Context, request InputRequest) (OutputResponse, error) {
+	fmt.Printf("Input data %+v\n", request)
+	return core(request.Hours, request.Minutes, request.Second, request.Url), nil
 }
